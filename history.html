@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sensor History | Water System</title>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --primary: #00796b;
+            --primary-light: #4db6ac;
+            --secondary: #26a69a;
+            --bg: #f1f8f7;
+            --text: #2c3e50;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 20px;
+            color: var(--text);
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            font-weight: 300;
+            margin-bottom: 30px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* CONTROLS */
+        #controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+            padding: 15px;
+            background: #f9fdfc;
+            border-radius: 12px;
+            border: 1px solid #e0eeed;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input[type="date"] {
+            padding: 10px;
+            border: 2px solid #e0f2f1;
+            border-radius: 8px;
+            outline: none;
+            color: var(--text);
+        }
+
+        button {
+            padding: 10px 20px;
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background: var(--primary-light);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #edf2f4;
+            color: var(--primary);
+        }
+
+        /* TABLE STYLING */
+        .table-wrapper {
+            max-height: 400px;
+            overflow-y: auto;
+            border-radius: 12px;
+            border: 1px solid #eee;
+            margin-bottom: 30px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        thead th {
+            position: sticky;
+            top: 0;
+            background: var(--primary);
+            color: white;
+            padding: 15px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 12px 15px;
+            text-align: center;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 15px;
+        }
+
+        tr:nth-child(even) { background: #fafafa; }
+        tr:hover { background: #f1f8f7; }
+
+        /* CHART CONTAINER */
+        #chartContainer {
+            padding: 20px;
+            background: #fff;
+            border-radius: 15px;
+            border: 1px solid #f0f0f0;
+        }
+
+        @media(max-width: 768px){
+            #controls { flex-direction: column; }
+            .container { padding: 15px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <button onclick="window.location.href='index.html'" class="btn-secondary">← Back</button>
+        <h1>Sensor History</h1>
+        <div style="width: 80px;"></div> </div>
+
+    <div id="controls">
+        <div class="input-group">
+            <label for="filterDate">Filter by Date:</label>
+            <input type="date" id="filterDate">
+        </div>
+        <button id="refreshBtn">Refresh Data</button>
+    </div>
+
+    <div class="table-wrapper">
+        <table id="historyTable">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Temp (°C)</th>
+                    <th>Humidity (%)</th>
+                    <th>Soil (%)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="4">Connecting to database...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="chartContainer">
+        <canvas id="sensorChart"></canvas>
+    </div>
+</div>
+
+<script>
+// ---------- Firebase Init ----------
+const firebaseConfig = {
+    apiKey: "AIzaSyAw0VOvTmBHsKbAis3dANMpkSdruQSV2AI",
+    authDomain: "waterfountain-25330.firebaseapp.com",
+    databaseURL: "https://waterfountain-25330-default-rtdb.firebaseio.com",
+    projectId: "waterfountain-25330",
+    storageBucket: "waterfountain-25330.firebasestorage.app",
+    messagingSenderId: "788100561386",
+    appId: "1:788100561386:web:3c0fc841c7b396e8c51a93",
+    measurementId: "G-LJNST5STZK"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let allSensorData = {};
+let chart = null;
+
+const tbody = document.querySelector('#historyTable tbody');
+const filterDateInput = document.getElementById('filterDate');
+const ctx = document.getElementById('sensorChart').getContext('2d');
+
+// ---------- Data Fetching ----------
+db.ref('sensors').orderByKey().limitToLast(100).on('value', snapshot => {
+    allSensorData = snapshot.val() || {};
+    updateView();
+});
+
+function updateView() {
+    const selectedDate = filterDateInput.value;
+    renderTable(selectedDate);
+    renderChart(selectedDate);
+}
+
+function renderTable(dateFilter) {
+    tbody.innerHTML = '';
+    const keys = Object.keys(allSensorData).reverse(); // Newest first
+
+    let rowsFound = 0;
+    keys.forEach(ts => {
+        if (dateFilter && !ts.startsWith(dateFilter)) return;
+        
+        const data = allSensorData[ts];
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td style="font-weight:bold; color:#555">${ts.replace('_', ' ')}</td>
+            <td><span style="color:#d32f2f">${data.temperature ?? '-'}°</span></td>
+            <td><span style="color:#1976d2">${data.humidity ?? '-'}%</span></td>
+            <td><span style="color:#388e3c">${data.soilMoisture ?? '-'}%</span></td>
+        `;
+        tbody.appendChild(tr);
+        rowsFound++;
+    });
+
+    if (rowsFound === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No records found for this date.</td></tr>';
+    }
+}
+
+function renderChart(dateFilter) {
+    const labels = [], tempArr = [], humArr = [], soilArr = [];
+    
+    // Sort keys chronologically for the chart
+    Object.keys(allSensorData).sort().forEach(ts => {
+        if (dateFilter && !ts.startsWith(dateFilter)) return;
+        
+        const data = allSensorData[ts];
+        labels.push(ts.split('_')[1] || ts); // Show only time if possible
+        tempArr.push(data.temperature);
+        humArr.push(data.humidity);
+        soilArr.push(data.soilMoisture);
+    });
+
+    if (chart) chart.destroy();
+
+    chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Temp (°C)',
+                    data: tempArr,
+                    borderColor: '#f44336',
+                    backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 2
+                },
+                {
+                    label: 'Humidity (%)',
+                    data: humArr,
+                    borderColor: '#2196f3',
+                    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 2
+                },
+                {
+                    label: 'Soil (%)',
+                    data: soilArr,
+                    borderColor: '#4caf50',
+                    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'bottom' },
+                tooltip: { mode: 'index', intersect: false }
+            },
+            scales: {
+                y: { beginAtZero: true, grid: { color: '#f0f0f0' } },
+                x: { grid: { display: false } }
+            }
+        }
+    });
+}
+
+// ---------- Event Listeners ----------
+filterDateInput.addEventListener('change', updateView);
+document.getElementById('refreshBtn').addEventListener('click', updateView);
+
+</script>
+</body>
+</html>

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plant Health Report</title>
+    
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+    <style>
+        :root {
+            --primary: #00796b;
+            --bg: #f0f4f8;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+            --danger: #d32f2f;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        h1 {
+            color: var(--primary);
+            margin: 0;
+            font-weight: 300;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn {
+            text-decoration: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-weight: bold;
+            transition: 0.3s;
+            cursor: pointer;
+            border: 1px solid #ddd;
+            font-size: 13px;
+        }
+
+        .btn-back {
+            background: white;
+            color: var(--primary);
+        }
+
+        .btn-back:hover {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-clear {
+            background: #ffebee;
+            color: var(--danger);
+            border-color: #ffcdd2;
+        }
+
+        .btn-clear:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        /* TABLE STYLING */
+        .report-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead {
+            background: var(--primary);
+            color: white;
+        }
+
+        th {
+            padding: 15px;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+
+        td {
+            padding: 15px;
+            text-align: center;
+            border-bottom: 1px solid #edf2f2;
+        }
+
+        /* IMAGE STYLING */
+        .img-wrapper {
+            width: 110px;
+            height: 75px;
+            margin: 0 auto;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 2px solid #eee;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .img-wrapper:hover { transform: scale(1.1); border-color: var(--primary); }
+        .img-wrapper img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* BADGES & ACTIONS */
+        .status-text {
+            font-weight: bold;
+            padding: 4px 10px;
+            border-radius: 4px;
+            background: #f1f1f1;
+            font-size: 13px;
+        }
+
+        .delete-icon {
+            color: #999;
+            cursor: pointer;
+            font-size: 18px;
+            transition: 0.2s;
+        }
+
+        .delete-icon:hover { color: var(--danger); }
+
+        /* MODAL FOR IMAGE ZOOM */
+        #zoomModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #zoomModal img {
+            max-width: 90%;
+            max-height: 80%;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <header>
+        <a href="index.html" class="btn btn-back">← DASHBOARD</a>
+        <h1>Plant Report</h1>
+        <div class="header-actions">
+            <button class="btn btn-clear" onclick="clearAllData()">🗑 CLEAR ALL</button>
+        </div>
+    </header>
+
+    <div class="report-card">
+        <table id="reportTable">
+            <thead>
+                <tr>
+                    <th>Date/Time</th>
+                    <th>Image</th>
+                    <th>Dry Status</th>
+                    <th>Plant Health</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr><td colspan="5">Loading data...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="zoomModal" onclick="this.style.display='none'">
+    <img id="zoomImg" src="">
+</div>
+
+<script>
+// ---------- Firebase Init ----------
+const firebaseConfig = {
+    apiKey: "AIzaSyAw0VOvTmBHsKbAis3dANMpkSdruQSV2AI",
+    authDomain: "waterfountain-25330.firebaseapp.com",
+    databaseURL: "https://waterfountain-25330-default-rtdb.firebaseio.com",
+    projectId: "waterfountain-25330",
+    storageBucket: "waterfountain-25330.firebasestorage.app",
+    messagingSenderId: "788100561386",
+    appId: "1:788100561386:web:3c0fc841c7b396e8c51a93",
+    measurementId: "G-LJNST5STZK"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+const tableBody = document.querySelector("#reportTable tbody");
+
+// Handle Zoom
+function zoom(src) {
+    document.getElementById('zoomImg').src = src;
+    document.getElementById('zoomModal').style.display = 'flex';
+}
+
+// DELETE SINGLE ENTRY
+function deleteEntry(key) {
+    if(confirm("Delete this specific report?")) {
+        db.ref('images/' + key).remove()
+        .then(() => alert("Entry deleted."))
+        .catch(err => console.error(err));
+    }
+}
+
+// DELETE ALL DATA
+function clearAllData() {
+    if(confirm("Are you sure you want to delete ALL reports? This cannot be undone.")) {
+        db.ref('images').remove()
+        .then(() => alert("All reports cleared."))
+        .catch(err => console.error(err));
+    }
+}
+
+// ---------- Fetch Images ----------
+db.ref('images').on('value', snapshot => {
+    tableBody.innerHTML = ""; 
+    const data = snapshot.val();
+    if(!data) {
+        tableBody.innerHTML = "<tr><td colspan='5'>No reports found.</td></tr>";
+        return;
+    }
+
+    const sortedKeys = Object.keys(data).reverse();
+
+    sortedKeys.forEach(key => {
+        const entry = data[key];
+        const row = document.createElement('tr');
+
+        // Timestamp
+        const dateCell = document.createElement('td');
+        dateCell.style.fontFamily = "monospace";
+        dateCell.innerText = key.replace('_', ' ');
+        row.appendChild(dateCell);
+
+        // Image
+        const imgCell = document.createElement('td');
+        if(entry.image){
+            const imgSrc = "data:image/jpeg;base64," + entry.image;
+            imgCell.innerHTML = `
+                <div class="img-wrapper" onclick="zoom('${imgSrc}')">
+                    <img src="${imgSrc}">
+                </div>`;
+        } else {
+            imgCell.innerText = "No image";
+        }
+        row.appendChild(imgCell);
+
+        // Dry status
+        const dryCell = document.createElement('td');
+        dryCell.innerHTML = `<span class="status-text">${entry.dry_status || "-"}</span>`;
+        row.appendChild(dryCell);
+
+        // Plant status
+        const plantCell = document.createElement('td');
+        plantCell.innerHTML = `<span class="status-text">${entry.plant_health || "-"}</span>`;
+        row.appendChild(plantCell);
+
+        // Delete Action
+        const actionCell = document.createElement('td');
+        actionCell.innerHTML = `<span class="delete-icon" onclick="deleteEntry('${key}')">🗑</span>`;
+        row.appendChild(actionCell);
+
+        tableBody.appendChild(row);
+    });
+});
+</script>
+
+</body>
+</html>
